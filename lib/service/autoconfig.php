@@ -97,7 +97,7 @@ class AutoConfig {
 	 * @param $inboundUser
 	 * @param $inboundPassword
 	 * @param string|null $inboundSslMode
-	 * @return int MailAccountId
+	 * @return MailAccount
 	 */
 	private function addAccount($ocUserId, $email, $inboundHost, $inboundHostPort, $inboundUser, $inboundPassword, $inboundSslMode, $name)
 	{
@@ -115,7 +115,7 @@ class AutoConfig {
 
 		$this->mapper->save($mailAccount);
 
-		return $mailAccount->getMailAccountId();
+		return $mailAccount;
 	}
 
 	/**
@@ -124,15 +124,16 @@ class AutoConfig {
 	 * @param $password
 	 * @return int|null
 	 */
-	public function createAutoDetected($email, $password, $name)
-	{
+	public function createAutoDetected($email, $password, $name) {
+
 		// splitting the email address into user and host part
-		list($user, $host) = explode("@", $email);
+		list(, $host) = explode("@", $email);
 
 		$ispdb = $this->queryMozillaIspDb($host, true);
 		if (!empty($ispdb)) {
+			$account = null;
 			if (isset($ispdb['imap'])) {
-				foreach($ispdb['imap'] as $imap) {
+				foreach ($ispdb['imap'] as $imap) {
 					$host = $imap['hostname'];
 					$port = $imap['port'];
 					$encryptionProtocol = null;
@@ -142,7 +143,7 @@ class AutoConfig {
 					if ($imap['socketType'] === 'STARTTLS') {
 						$encryptionProtocol = 'tls';
 					}
-					if ($imap['username'] === '%EMAILADDRESS%' ) {
+					if ($imap['username'] === '%EMAILADDRESS%') {
 						$user = $email;
 					} elseif ($imap['username'] === '%EMAILLOCALPART%') {
 						list($user,) = explode("@", $email);
@@ -153,34 +154,57 @@ class AutoConfig {
 					try {
 						$this->getImapConnection($host, $port, $user, $password, $encryptionProtocol);
 						$this->log("Test-Account-Successful: $this->userId, $host, $port, $user, $encryptionProtocol");
-						return $this->addAccount($this->userId, $email, $host, $port, $user, $password, $encryptionProtocol, $name);
+						$account = $this->addAccount($this->userId, $email, $host, $port, $user, $password, $encryptionProtocol, $name);
+						if (!is_null($account)) {
+							break;
+						}
 					} catch (\Horde_Imap_Client_Exception $e) {
 						$error = $e->getMessage();
 						$this->log("Test-Account-Failed: $this->userId, $host, $port, $user, $encryptionProtocol -> $error");
 					}
 				}
 			}
-			return null;
-		}
+			if (!is_null($account)) {
+				foreach ($ispdb['smtp'] as $smtp) {
+					try {
+						if ($smtp['username'] === '%EMAILADDRESS%') {
+							$user = $email;
+						} elseif ($smtp['username'] === '%EMAILLOCALPART%') {
+							list($user,) = explode("@", $email);
+						} else {
+							$this->log("Unknown username variable: " . $smtp['username']);
+							return null;
+						}
+						$params = array(
+							'auth' => true,
+							'debug' => true,
+							'host' => $smtp['hostname'],
+							'password' => $password,
+							'port' => $smtp['port'],
+							'username' => $user,
+							'timeout' => 2
+						);
+						$smtpTransport = new \Horde_Mail_Transport_Smtp($params);
+						$smtpTransport->getSMTPObject();
+	//					$account->setOutboundHost();
 
-		/*
-		 * Try to get the mx record for the email address
-		 */
-		$mxHosts = $this->getMxRecord($host);
-		if ($mxHosts) {
-			foreach($mxHosts as $mxHost) {
-				$result = $this->testAccount($email, $mxHost, array($user, $email), $password, $name);
-				if ($result) {
-					return $result;
+						$this->mapper->save($account);
+
+					} catch(\PEAR_Exception $ex) {
+						$this->log("Test-Account-Failed(smtp): ");
+					}
+
 				}
+				return $account;
 			}
 		}
 
-		/*
-		 * IMAP login with full email address as user
-		 * works for a lot of providers (e.g. Google Mail)
-		 */
-		return $this->testAccount($email, $host, array($user, $email), $password, $name);
+		$account = $this->detectImap($email, $password, $name);
+		if (!is_null($account)) {
+			return $account->getMailAccountId();
+		}
+
+		return null;
 	}
 
 	private function log($message) {
@@ -252,6 +276,37 @@ class AutoConfig {
 			}
 		}
 		return $provider;
+	}
+
+	/**
+	 * @param $email
+	 * @param $password
+	 * @param $name
+	 * @return MailAccount|null
+	 */
+	private function detectImap($email, $password, $name) {
+
+		// splitting the email address into user and host part
+		list($user, $host) = explode("@", $email);
+
+		/*
+		 * Try to get the mx record for the email address
+		 */
+		$mxHosts = $this->getMxRecord($host);
+		if ($mxHosts) {
+			foreach ($mxHosts as $mxHost) {
+				$result = $this->testAccount($email, $mxHost, array($user, $email), $password, $name);
+				if ($result) {
+					return $result;
+				}
+			}
+		}
+
+		/*
+		 * IMAP login with full email address as user
+		 * works for a lot of providers (e.g. Google Mail)
+		 */
+		return $this->testAccount($email, $host, array($user, $email), $password, $name);
 	}
 
 }

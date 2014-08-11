@@ -18,7 +18,10 @@
         "pear-pear.horde.org/Horde_Text_Filter": ">=2.1.0@stable,<=3.0.0alpha1@stable",
         "pear-pear.horde.org/Horde_Text_Flowed": ">=2.0.0@stable,<=3.0.0alpha1@stable",
         "pear-pear.horde.org/Horde_Util": ">=2.2.0@stable,<=3.0.0alpha1@stable",
-		"ezyang/htmlpurifier": "v4.6.0"
+		"ezyang/htmlpurifier": "v4.6.0",
+		"pear/pear_exception": "1.0.*@dev",
+		"pear/net_socket": "dev-trunk",
+		"pear/net_smtp": "dev-master"
 	}
 }
 
